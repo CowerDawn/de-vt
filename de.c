@@ -1,0 +1,92 @@
+#include <gtk/gtk.h>
+#include <vte/vte.h>
+#include <gdk/gdkx.h>
+#include <X11/Xlib.h>
+
+GtkWidget *window;
+GtkWidget *terminal;
+
+void set_window_below(GtkWidget *window) {
+    GdkWindow *gdk_window = gtk_widget_get_window(window);
+    if (gdk_window) {
+        Display *xdisplay = GDK_WINDOW_XDISPLAY(gdk_window);
+        Window xwindow = GDK_WINDOW_XID(gdk_window);
+        Atom net_wm_state = XInternAtom(xdisplay, "_NET_WM_STATE", False);
+        Atom net_wm_state_below = XInternAtom(xdisplay, "_NET_WM_STATE_BELOW", False);
+        Atom net_wm_state_skip_taskbar = XInternAtom(xdisplay, "_NET_WM_STATE_SKIP_TASKBAR", False);
+        Atom net_wm_state_skip_pager = XInternAtom(xdisplay, "_NET_WM_STATE_SKIP_PAGER", False);
+        XClientMessageEvent xclient;
+        memset(&xclient, 0, sizeof(xclient));
+        xclient.type = ClientMessage;
+        xclient.window = xwindow;
+        xclient.message_type = net_wm_state;
+        xclient.format = 32;
+        xclient.data.l[0] = 1;
+        xclient.data.l[1] = net_wm_state_below;
+        xclient.data.l[2] = net_wm_state_skip_taskbar;
+        xclient.data.l[3] = net_wm_state_skip_pager;
+        xclient.data.l[4] = 0;
+        XSendEvent(xdisplay, DefaultRootWindow(xdisplay), False,
+                   SubstructureRedirectMask | SubstructureNotifyMask,
+                   (XEvent *)&xclient);
+    }
+}
+
+const char *get_shell() {
+    const char *shell = g_getenv("SHELL");
+    if (!shell || access(shell, X_OK) != 0) {
+        shell = "/bin/bash";
+        if (access(shell, X_OK) != 0) {
+            shell = "/bin/sh";
+        }
+    }
+    return shell;
+}
+
+GtkWidget *create_terminal() {
+    GtkWidget *terminal = vte_terminal_new();
+    gtk_widget_show(terminal);
+    GdkRGBA background = {0.1, 0.1, 0.1, 1.0};
+    GdkRGBA foreground = {1.0, 1.0, 1.0, 1.0};
+    vte_terminal_set_color_background(VTE_TERMINAL(terminal), &background);
+    vte_terminal_set_color_foreground(VTE_TERMINAL(terminal), &foreground);
+    const char *shell = get_shell();
+    char *shell_argv[] = { (char *)shell, NULL };
+    vte_terminal_spawn_async(VTE_TERMINAL(terminal),
+                             VTE_PTY_DEFAULT,
+                             NULL,
+                             shell_argv,
+                             NULL,
+                             G_SPAWN_SEARCH_PATH,
+                             NULL, NULL, NULL, -1, NULL, NULL, NULL);
+    return terminal;
+}
+
+gboolean on_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
+    if (event->state & GDK_CONTROL_MASK && event->keyval == GDK_KEY_h) {
+        if (gtk_widget_get_visible(window)) {
+            gtk_widget_hide(window);
+        } else {
+            gtk_widget_show_all(window);
+        }
+        return TRUE;
+    }
+    return FALSE;
+}
+
+int main(int argc, char *argv[]) {
+    gtk_init(&argc, &argv);
+    window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), "DE-VT");
+    gtk_window_maximize(GTK_WINDOW(window));
+    gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
+    gtk_window_set_keep_below(GTK_WINDOW(window), TRUE);
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    set_window_below(window);
+    terminal = create_terminal();
+    gtk_container_add(GTK_CONTAINER(window), terminal);
+    g_signal_connect(window, "key-press-event", G_CALLBACK(on_key_press), NULL);
+    gtk_widget_show_all(window);
+    gtk_main();
+    return 0;
+}
